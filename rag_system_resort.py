@@ -155,7 +155,7 @@ class EmbeddingRetriever:
         logger.info(f"Built FAISS index with {self.index.ntotal} documents")
     
     def retrieve(self, query: str, top_k: int = 5) -> List[Tuple[Document, float]]:
-        """Retrieve top-k most relevant documents"""
+        """Retrieve top-k most relevant documents in descending order of relevance"""
         if self.index is None:
             raise ValueError("Index not built. Call build_index first.")
         
@@ -171,8 +171,11 @@ class EmbeddingRetriever:
             if idx < len(self.documents):  # Valid index
                 results.append((self.documents[idx], float(score)))
         
+        # Sort results by score in descending order
+        results.sort(key=lambda x: x[1], reverse=True)
+        
         return results
-    
+
     def save_index(self, save_dir: str):
         """Save the index and related data"""
         os.makedirs(save_dir, exist_ok=True)
@@ -373,7 +376,7 @@ def main():
     evaluation_results = rag.evaluate_system(
         qa_file_path="ucb_eecs_rag_eval_dataset.jsonl",  # Your QA pairs file
         top_k=3,
-        save_results_file="eval/evaluation_results.json",
+        save_results_file="eval/evaluation_results_resort.json",
         run_ablation=True
     )
     

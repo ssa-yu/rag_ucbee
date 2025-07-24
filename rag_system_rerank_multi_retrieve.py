@@ -4,6 +4,7 @@ import re
 import numpy as np
 from typing import List, Dict, Tuple, Optional
 from sentence_transformers import SentenceTransformer
+from sentence_transformers import CrossEncoder
 import faiss
 from IPython import embed
 import torch
@@ -13,10 +14,12 @@ import pickle
 import evaluate
 
 from models import ModelConfig, GeneratorFactory, MODEL_CONFIGS
+from rank_bm25 import BM25Okapi
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
 
 @dataclass
 class Document:
@@ -26,6 +29,20 @@ class Document:
     title: str
     url: str
     chunk_index: int
+
+class BM25Retriever:
+    """Simple sparse keyword-based retriever using BM25"""
+
+    def __init__(self, documents: List[Document]):
+        self.documents = documents
+        self.corpus = [doc.content.split() for doc in documents]
+        self.bm25 = BM25Okapi(self.corpus)
+
+    def retrieve(self, query: str, top_k: int = 5) -> List[Tuple[Document, float]]:
+        query_tokens = query.split()
+        scores = self.bm25.get_scores(query_tokens)
+        ranked_indices = np.argsort(scores)[::-1][:top_k]
+        return [(self.documents[idx], float(scores[idx])) for idx in ranked_indices]
 
 class DocumentChunker:
     """Handles text chunking for RAG system"""
@@ -220,6 +237,8 @@ class RAGSystem:
         self.retriever = EmbeddingRetriever(config.retriever_model)
         self.generator = GeneratorFactory.create_generator(config.generator_type, config.generator_model)
         self.is_built = False
+        self.reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+        self.bm25_retriever = None 
     
     def build_system(self, crawled_data_path: str):
         """Build the complete RAG system from crawled data"""
@@ -250,34 +269,60 @@ class RAGSystem:
         
         # Build retrieval index
         self.retriever.build_index(documents)
-        
+        self.bm25_retriever = BM25Retriever(documents)
+
         self.is_built = True
         logger.info("RAG system built successfully!")
     
     def answer_question(self, question: str, top_k: int = 3) -> Dict:
-        """Answer a question using the RAG system"""
+        """Answer a question using multi-retriever + reranker in the RAG system"""
         if not self.is_built:
             raise ValueError("System not built. Call build_system first.")
-        
+
         k = top_k or self.config.top_k
-        retrieved_docs = self.retriever.retrieve(question, k)
-        answer = self.generator.generate_answer(question, retrieved_docs, self.config.max_length)
+
+        # 🔹 Step 1: Retrieve from both dense (FAISS) and sparse (BM25)
+        dense_results = self.retriever.retrieve(question, k)
+        sparse_results = self.bm25_retriever.retrieve(question, k)
+
+        # 🔹 Step 2: Merge and deduplicate by doc ID, keep higher score if conflict
+        all_results = dense_results + sparse_results
+        seen_ids = {}
+        for doc, score in all_results:
+            if doc.id not in seen_ids:
+                seen_ids[doc.id] = (doc, score)
+            else:
+                # Keep the higher score
+                if score > seen_ids[doc.id][1]:
+                    seen_ids[doc.id] = (doc, score)
         
-        # Prepare response with sources
+        merged_results = list(seen_ids.values())
+        merged_results = sorted(merged_results, key=lambda x: x[1], reverse=True)[:k * 3]  # 保留前 2k 作 rerank
+
+        # 🔹 Step 3: Rerank top documents using cross-encoder
+        pairs = [(question, doc.content) for doc, _ in merged_results]
+        scores = self.reranker.predict(pairs)
+        reranked = sorted(zip(merged_results, scores), key=lambda x: x[1], reverse=True)
+        reranked_docs = [(doc, score) for (doc, _), score in reranked[:k]]  # Top-k
+
+        # 🔹 Step 4: Generate answer
+        answer = self.generator.generate_answer(question, reranked_docs, self.config.max_length)
+
+        # 🔹 Step 5: Prepare sources metadata
         sources = []
-        for doc, score in retrieved_docs:
+        for doc, score in reranked_docs:
             sources.append({
                 'title': doc.title,
                 'url': doc.url,
                 'relevance_score': float(score),
                 'content_snippet': doc.content[:200] + "..." if len(doc.content) > 200 else doc.content
             })
-        
+
         return {
             'question': question,
             'answer': answer,
             'sources': sources,
-            'num_retrieved': len(retrieved_docs),
+            'num_retrieved': len(reranked_docs),
             'config': {
                 'retriever_model': self.config.retriever_model,
                 'generator_model': self.config.generator_model,
@@ -342,6 +387,8 @@ class RAGSystem:
             return
         
         self.retriever.load_index(save_dir)
+        self.bm25_retriever = BM25Retriever(self.retriever.documents)
+
         self.is_built = True
         logger.info(f"RAG system loaded from {save_dir}")
 
@@ -373,7 +420,7 @@ def main():
     evaluation_results = rag.evaluate_system(
         qa_file_path="ucb_eecs_rag_eval_dataset.jsonl",  # Your QA pairs file
         top_k=3,
-        save_results_file="eval/evaluation_results.json",
+        save_results_file="eval/evaluation_results_3k_rerank_multi_retrieve.json",
         run_ablation=True
     )
     

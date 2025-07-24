@@ -4,6 +4,7 @@ import re
 import numpy as np
 from typing import List, Dict, Tuple, Optional
 from sentence_transformers import SentenceTransformer
+from sentence_transformers import CrossEncoder
 import faiss
 from IPython import embed
 import torch
@@ -220,6 +221,7 @@ class RAGSystem:
         self.retriever = EmbeddingRetriever(config.retriever_model)
         self.generator = GeneratorFactory.create_generator(config.generator_type, config.generator_model)
         self.is_built = False
+        self.reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
     
     def build_system(self, crawled_data_path: str):
         """Build the complete RAG system from crawled data"""
@@ -260,24 +262,30 @@ class RAGSystem:
             raise ValueError("System not built. Call build_system first.")
         
         k = top_k or self.config.top_k
-        retrieved_docs = self.retriever.retrieve(question, k)
-        answer = self.generator.generate_answer(question, retrieved_docs, self.config.max_length)
-        
-        # Prepare response with sources
+        retrieved_docs = self.retriever.retrieve(question, k * 2)  # 多取幾筆，給 reranker 有選擇
+
+        # 🟡 加入重排序步驟
+        pairs = [(question, doc.content) for doc, _ in retrieved_docs]
+        scores = self.reranker.predict(pairs)
+        reranked = sorted(zip(retrieved_docs, scores), key=lambda x: x[1], reverse=True)
+        reranked_docs = [(doc, score) for (doc, _), score in reranked[:k]]  # 取 top_k
+
+        answer = self.generator.generate_answer(question, reranked_docs, self.config.max_length)
+
         sources = []
-        for doc, score in retrieved_docs:
+        for doc, score in reranked_docs:
             sources.append({
                 'title': doc.title,
                 'url': doc.url,
                 'relevance_score': float(score),
                 'content_snippet': doc.content[:200] + "..." if len(doc.content) > 200 else doc.content
             })
-        
+
         return {
             'question': question,
             'answer': answer,
             'sources': sources,
-            'num_retrieved': len(retrieved_docs),
+            'num_retrieved': len(reranked_docs),
             'config': {
                 'retriever_model': self.config.retriever_model,
                 'generator_model': self.config.generator_model,
@@ -373,7 +381,7 @@ def main():
     evaluation_results = rag.evaluate_system(
         qa_file_path="ucb_eecs_rag_eval_dataset.jsonl",  # Your QA pairs file
         top_k=3,
-        save_results_file="eval/evaluation_results.json",
+        save_results_file="eval/evaluation_results_rerank.json",
         run_ablation=True
     )
     
