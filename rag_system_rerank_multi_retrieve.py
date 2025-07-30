@@ -297,7 +297,7 @@ class RAGSystem:
                     seen_ids[doc.id] = (doc, score)
         
         merged_results = list(seen_ids.values())
-        merged_results = sorted(merged_results, key=lambda x: x[1], reverse=True)[:k * 3]  # 保留前 2k 作 rerank
+        merged_results = sorted(merged_results, key=lambda x: x[1], reverse=True)[:k * 2]  # 保留前 2k 作 rerank
 
         # 🔹 Step 3: Rerank top documents using cross-encoder
         pairs = [(question, doc.content) for doc, _ in merged_results]
@@ -420,7 +420,7 @@ def main():
     evaluation_results = rag.evaluate_system(
         qa_file_path="ucb_eecs_rag_eval_dataset.jsonl",  # Your QA pairs file
         top_k=3,
-        save_results_file="eval/evaluation_results_3k_rerank_multi_retrieve.json",
+        save_results_file="eval/evaluation_results_rerank_multi_retrieve.json",
         run_ablation=True
     )
     
