@@ -46,7 +46,7 @@ This system adopts a **hybrid retrieval strategy** that combines both sparse and
 - Run comparative experiments using combinations of:
   - With/without query rewriting
   - With/without reranking
-  
+
 The table shows the performance under different settings, evaluated using three key metrics:
 
 | Metric       | Description |
@@ -86,4 +86,4 @@ These chunks are then embedded using embedding model and indexed with FAISS.
 
 ## License
 
-MIT License. This project is for educational and research use only.
+ Apache License 2.0. This project is for educational and research use only.
