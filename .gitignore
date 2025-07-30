@@ -2,6 +2,7 @@
 eecs_20250606_text_bs_rewritten.jsonl
 ucb_eecs_rag_eval_dataset.jsonl
 /rag_index
+/enhanced_rag_index
 comparison_results
 
 # Byte-compiled / optimized / DLL files

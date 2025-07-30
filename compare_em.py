@@ -48,7 +48,7 @@ def main(file1_path, file2_path):
             "reference_answer": item1["reference_answer"],
             f"{file1_name}_predicted_answer": item1["predicted_answer"],
             f"{file2_name}_predicted_answer": item2["predicted_answer"],
-            "url": item1["url"]
+            "url": item1["reference_url"]
         }
 
         if em1 == 1 and em2 == 0:

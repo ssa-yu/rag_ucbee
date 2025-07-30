@@ -170,7 +170,8 @@ MODEL_CONFIGS = {
     ),
     "medium_balanced": ModelConfig(
         retriever_model="all-MiniLM-L6-v2", 
-        generator_model="google/flan-t5-base",
+        generator_model="google/flan-t5-base", # small generated model
+        generator_model="google/flan-t5-xxl",
         generator_type="seq2seq",
         chunk_size=500,
         top_k=3
