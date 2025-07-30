@@ -47,6 +47,12 @@ This system adopts a **hybrid retrieval strategy** that combines both sparse and
   - With/without query rewriting
   - With/without reranking
 
+> 💡 **Note**: We replaced the final LLM from `google/t5-base` to `google/t5-xxl`, resulting in a significant performance boost
+> Exact Match and F1-Score increased to **35.92%** and **44.1%**, respectively.  
+> This confirms that the retrieved chunks from our method provide highly relevant context for the LLM.  
+>You can check the [evaluation result](./eval/evaluation_results_with_all_componenets_t5xxl.json).
+
+
 The table shows the performance under different settings, evaluated using three key metrics:
 
 | Metric       | Description |
